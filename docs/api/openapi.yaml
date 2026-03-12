@@ -1,0 +1,444 @@
+openapi: 3.0.3
+info:
+  title: Multi-Agent System API
+  version: 1.0.0
+  description: >
+    HTTP API для multi-agent оркестрации поверх OpenAI-compatible backend.
+    В зависимости от текущей инфраструктуры backend может быть реализован через
+    Ollama, vLLM или другой совместимый сервис. API поддерживает низкоуровневый
+    pipeline из агентных alias и специализированные endpoints для генерации
+    длинных IT-статей.
+servers:
+  - url: http://localhost:8080
+    description: Локальный запуск через docker compose
+tags:
+  - name: agents
+    description: Низкоуровневые endpoints для работы с моделями и pipeline.
+  - name: articles
+    description: Специализированные endpoints для outline и полной генерации статьи.
+paths:
+  /:
+    get:
+      tags: [agents]
+      summary: Информация о сервисе и доступных агентах
+      description: >
+        Возвращает базовую информацию о запущенном API: имя приложения, его
+        версию и словарь доступных agent aliases. Endpoint полезен как быстрый
+        sanity-check для защищенной части API и как источник актуального списка
+        агентных ролей.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Метаданные сервиса и доступные агентные alias.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    description: Человекочитаемое имя приложения.
+                    example: Multi-Agent System API
+                  version:
+                    type: string
+                    description: Текущая версия API.
+                    example: 1.0.0
+                  agents:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: >
+                      Словарь доступных agent aliases и backend model names,
+                      на которые они сейчас ссылаются.
+                    example:
+                      writer: writer
+                      summarizer: summarizer
+                      editor: editor
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+  /health:
+    get:
+      tags: [agents]
+      summary: Публичный healthcheck
+      description: >
+        Публичный endpoint для liveness/readiness-проверки. Не требует Bearer-
+        токена. Показывает только то, что API-процесс жив и отвечает на HTTP-
+        запросы.
+      responses:
+        "200":
+          description: Простой статус здоровья сервиса.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  vllm_connected:
+                    type: boolean
+                    description: >
+                      Историческое поле совместимости. Сейчас используется как
+                      простой флаг здоровья процесса, а не как гарантированный
+                      результат проверки upstream backend.
+                    example: true
+  /models:
+    get:
+      tags: [agents]
+      summary: Список моделей, доступных в backend
+      description: >
+        Запрашивает у upstream backend список доступных моделей. В зависимости от
+        текущего runtime это могут быть модели Ollama, vLLM или другой
+        OpenAI-compatible backend. Используйте этот endpoint, чтобы убедиться,
+        что нужные `writer`, `summarizer`, `editor` или другие alias реально
+        зарегистрированы.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Список имен моделей, доступных в текущем backend.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    description: >
+                      Список model identifiers, которые backend готов принять в
+                      параметре `model`.
+                    items:
+                      type: string
+                    example:
+                      - writer
+                      - summarizer
+                      - editor
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailableError"
+  /pipeline:
+    post:
+      tags: [agents]
+      summary: Запуск последовательного multi-agent pipeline
+      description: >
+        Принимает исходный текст и список agent aliases. Сервис прогоняет текст
+        через них по очереди: результат каждого шага становится входом
+        следующего. Это универсальный низкоуровневый endpoint для цепочек вроде
+        `summarizer -> writer` или `writer -> editor`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MultiAgentRequest"
+      responses:
+        "200":
+          description: Итоговый результат после прохождения всего pipeline.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pipeline:
+                    type: array
+                    description: Список alias, которые были использованы в порядке выполнения.
+                    items:
+                      type: string
+                    example:
+                      - summarizer
+                      - writer
+                  result:
+                    type: string
+                    description: Текст, полученный после завершения последнего шага pipeline.
+                    example: Итоговый текст после последовательной обработки агентами.
+        "400":
+          description: Ошибка валидации pipeline, например неизвестный alias агента.
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailableError"
+  /articles/outline:
+    post:
+      tags: [articles]
+      summary: Сгенерировать outline статьи
+      description: >
+        Создает структуру будущей статьи на основе темы, аудитории и желаемого
+        стиля. Сначала вызывайте этот endpoint, если хотите проверить, насколько
+        хорошо модель понимает тему и держит структуру. В ответе возвращаются и
+        сырой markdown-outline, и уже распарсенные разделы.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OutlineRequest"
+      responses:
+        "200":
+          description: Заголовок статьи, markdown-outline и распарсенные разделы.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutlineResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "422":
+          $ref: "#/components/responses/OutlineParseFailedError"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailableError"
+  /articles/generate:
+    post:
+      tags: [articles]
+      summary: Сгенерировать полную статью
+      description: >
+        Полный article workflow: при необходимости сервис сначала строит
+        outline, затем последовательно генерирует главы, summaries для контекста
+        следующих глав и финальное заключение. Используйте этот endpoint, когда
+        нужен уже готовый markdown-текст статьи, а не только ее структура.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ArticleGenerateRequest"
+      responses:
+        "200":
+          description: Полностью собранная статья, все разделы и итоговый markdown.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArticleGenerateResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "422":
+          $ref: "#/components/responses/OutlineParseFailedError"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailableError"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API token
+      description: Bearer-токен, заданный через `API_BEARER_TOKEN`.
+  responses:
+    UnauthorizedError:
+      description: Отсутствует или некорректен Bearer-токен.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Missing or invalid bearer token.
+    UpstreamUnavailableError:
+      description: Backend моделей недоступен или вернул ошибку.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: UPSTREAM_UNAVAILABLE
+              message: Failed to fetch models from upstream backend.
+              details:
+                base_url: http://ollama-server:11434
+                reason: connection refused
+    OutlineParseFailedError:
+      description: Модель вернула outline в формате, который не удалось распарсить в разделы.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: OUTLINE_PARSE_FAILED
+              message: Could not parse outline into sections.
+              details:
+                expected_format: "1. Section title :: short description"
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true
+    MultiAgentRequest:
+      type: object
+      required:
+        - initial_prompt
+        - pipeline
+      properties:
+        initial_prompt:
+          type: string
+          description: Исходный текст или запрос, который будет последовательно обработан агентами pipeline.
+          example: Сделай черновик статьи про Kubernetes для backend-разработчиков.
+        pipeline:
+          type: array
+          description: >
+            Список агентных alias в порядке выполнения. Каждый следующий агент
+            получает результат предыдущего шага.
+          items:
+            type: string
+          example:
+            - summarizer
+            - writer
+    OutlineRequest:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+          description: Тема будущей статьи. На ее основе модель строит заголовок и структуру outline.
+          example: Как Kubernetes упрощает деплой Python-сервисов
+        target_audience:
+          type: string
+          default: IT engineers
+          description: Целевая аудитория статьи. Влияет на глубину, терминологию и подачу материала.
+          example: backend engineers
+        style:
+          type: string
+          default: практический технический блог
+          description: Желаемый стиль изложения, например практический, прикладной или более академичный.
+          example: практический технический блог
+        desired_sections_count:
+          type: integer
+          minimum: 3
+          maximum: 8
+          default: 5
+          description: Сколько основных разделов должно быть в outline. Заключение в это число не входит.
+        include_code_examples:
+          type: boolean
+          default: true
+          description: Нужно ли ориентировать outline и статью на наличие примеров кода, CLI-команд и конфигураций.
+    OutlineSection:
+      type: object
+      properties:
+        index:
+          type: integer
+          description: Порядковый номер раздела в outline.
+          example: 1
+        title:
+          type: string
+          description: Название раздела.
+          example: Зачем Kubernetes нужен Python-командам
+        description:
+          type: string
+          description: Краткое описание того, что должно быть раскрыто в разделе.
+          example: Почему оркестрация контейнеров упрощает деплой и эксплуатацию сервисов.
+    OutlineResponse:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Итоговый заголовок статьи.
+          example: Как Kubernetes упрощает деплой Python-сервисов
+        outline_markdown:
+          type: string
+          description: Сырой markdown-outline, который вернула модель. Его можно переиспользовать в следующем запросе.
+          example: |
+            1. Зачем Kubernetes нужен Python-командам :: Кратко объяснить бизнес- и инженерную ценность.
+            2. Базовые сущности Kubernetes :: Рассказать про Pod, Deployment и Service.
+            3. Практический деплой FastAPI-приложения :: Показать минимальный рабочий пример.
+        sections:
+          type: array
+          description: Структурированное представление outline после парсинга.
+          items:
+            $ref: "#/components/schemas/OutlineSection"
+    ArticleGenerateRequest:
+      type: object
+      required:
+        - topic
+      properties:
+        topic:
+          type: string
+          description: Основная тема статьи. Используется и для генерации outline, и для генерации самих глав.
+          example: Как Kubernetes упрощает деплой Python-сервисов
+        outline_markdown:
+          type: string
+          nullable: true
+          description: >
+            Готовый outline статьи в markdown. Если не передан, сервис сначала
+            сам вызовет этап генерации outline.
+        target_audience:
+          type: string
+          default: IT engineers
+          description: Целевая аудитория статьи. Влияет на глубину объяснений и терминологию.
+        style:
+          type: string
+          default: практический технический блог
+          description: Желаемый стиль изложения для всех глав и заключения.
+        desired_sections_count:
+          type: integer
+          minimum: 3
+          maximum: 8
+          default: 5
+          description: Количество разделов, если outline будет генерироваться автоматически.
+        chapter_max_tokens:
+          type: integer
+          nullable: true
+          minimum: 500
+          maximum: 4000
+          description: Максимальное число токенов на одну главу.
+          example: 1200
+        context_mode:
+          type: string
+          enum:
+            - summaries
+          default: summaries
+          description: Способ передачи контекста между главами. Сейчас поддерживается только summaries.
+        include_code_examples:
+          type: boolean
+          default: true
+          description: Нужно ли просить модель включать код, CLI-команды или конфигурации там, где это уместно.
+    ArticleSectionResult:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Название сгенерированного раздела.
+          example: Практический деплой FastAPI-приложения
+        description:
+          type: string
+          description: Описание раздела из outline.
+          example: Показать минимальный рабочий пример деплоя сервиса в Kubernetes.
+        content:
+          type: string
+          description: Полный текст сгенерированной главы.
+        summary:
+          type: string
+          description: Краткое summary главы, использованное как контекст для следующих разделов.
+    ArticleGenerateResponse:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Итоговый заголовок статьи.
+          example: Как Kubernetes упрощает деплой Python-сервисов
+        outline_markdown:
+          type: string
+          description: Outline статьи в markdown.
+        sections:
+          type: array
+          description: Все сгенерированные разделы статьи.
+          items:
+            $ref: "#/components/schemas/ArticleSectionResult"
+        article_markdown:
+          type: string
+          description: Полностью собранная статья в markdown, включая заключение.

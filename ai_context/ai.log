@@ -1,0 +1,10 @@
+2026-03-11 Reorganized runtime code into src/ architecture and added long-form article generation endpoints.
+2026-03-11 Updated Docker configuration, docs, AGENTS.md and added unit/integration tests.
+2026-03-11 Added Bearer token auth, centralized compose parameters in env, and UID/GID-based container runtime defaults.
+2026-03-11 Switched article orchestration to LangChain and separated writer/summarizer agent roles in article generation.
+2026-03-11 Switched the pipeline layer to LangChain so vLLM remains the provider of agent aliases.
+2026-03-11 Removed the public direct-agent endpoint and renamed pipeline output field from article_response to result.
+2026-03-12 Renamed the Ollama integration directory to src/integrations/ollama_server and synchronized compose mounts, shell scripts, and docs.
+2026-03-12 Renamed src/integrations/vllm to src/integrations/vllm_server and synchronized imports and docs.
+2026-03-12 Moved Ollama GGUF adapters and generated Modelfiles into deploy/gguf_adapters and deploy/modelfiles, and synchronized compose mounts, scripts, and docs.
+2026-03-12 Moved the base Ollama fallback Modelfile into deploy/modelfiles and updated the bootstrap entrypoint and docs.

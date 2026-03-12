@@ -1,0 +1,139 @@
+services:
+  model-downloader:
+    profiles: ["manual"]
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.download
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      - ${MODEL_HOST_DIR:-./deploy/models}:/models
+      - ./deploy:/app
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      MODEL_ID: ${MODEL_ID:-MTSAIR/Cotype-Nano-4bit}
+      MODEL_DIR: ${MODEL_DIR:-/models/cotype-nano}
+      HOME: /tmp
+      HF_HOME: /tmp/huggingface
+
+  vllm-server:
+    profiles: ["manual"]
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.vllm-cpu
+      args:
+        VLLM_REF: ${VLLM_SOURCE_REF:-v0.8.5}
+    depends_on:
+      model-downloader:
+        condition: service_completed_successfully
+    ports:
+      - "${VLLM_PUBLISHED_PORT:-8000}:${VLLM_PORT:-8000}"
+    volumes:
+      - ${MODEL_HOST_DIR:-./deploy/models}:/models:ro
+      - ${LORA_HOST_DIR:-./deploy/lora_adapters}:/adapters:ro
+    environment:
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      VLLM_ALLOW_RUNTIME_LORA_UPDATING: ${VLLM_ALLOW_RUNTIME_LORA_UPDATING:-true}
+      VLLM_CPU_KVCACHE_SPACE: ${VLLM_CPU_KVCACHE_SPACE:-4}
+      VLLM_CPU_NUM_OF_RESERVED_CPU: ${VLLM_CPU_NUM_OF_RESERVED_CPU:-1}
+      VLLM_USE_AOT_COMPILE: ${VLLM_USE_AOT_COMPILE:-0}
+      VLLM_DISABLE_COMPILE_CACHE: ${VLLM_DISABLE_COMPILE_CACHE:-1}
+      HOME: /tmp
+      USER: root
+      LOGNAME: root
+      HF_HOME: /tmp/huggingface
+      TORCHINDUCTOR_CACHE_DIR: /tmp/torchinductor
+    command: >
+      ${MODEL_DIR:-/models/cotype-nano}
+      --trust-remote-code
+      --dtype ${VLLM_DTYPE:-bfloat16}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-2048}
+      --max-num-seqs ${VLLM_MAX_NUM_SEQS:-1}
+      --port ${VLLM_PORT:-8000}
+    shm_size: ${SHM_SIZE:-4g}
+
+  ollama-server:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PUBLISHED_PORT:-11434}:11434"
+    volumes:
+      - ${OLLAMA_HOST_DIR:-./src/integrations/ollama_server/ollama}:/root/.ollama
+      - ./src/integrations/ollama_server:/workspace/ollama_server
+      - ./deploy/gguf_adapters:/workspace/deploy/gguf_adapters
+      - ./deploy/modelfiles:/workspace/deploy/modelfiles
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODELS: /root/.ollama/models
+    command: serve
+    healthcheck:
+      test: ["CMD-SHELL", "OLLAMA_HOST=127.0.0.1:11434 ollama list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama-server:
+        condition: service_healthy
+    volumes:
+      - ${OLLAMA_HOST_DIR:-./src/integrations/ollama_server/ollama}:/root/.ollama
+      - ./src/integrations/ollama_server:/workspace/ollama_server:ro
+      - ./deploy/gguf_adapters:/workspace/deploy/gguf_adapters:ro
+      - ./deploy/modelfiles:/workspace/deploy/modelfiles:ro
+    environment:
+      OLLAMA_HOST: http://ollama-server:11434
+      OLLAMA_MODELS: /root/.ollama/models
+      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME:-hodza/cotype-nano-1.5-unofficial}
+    entrypoint: ["/bin/sh", "/workspace/ollama_server/ollama-entrypoint.sh"]
+
+  llama-converter:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.llama-converter
+      args:
+        LLAMA_CPP_REF: ${LLAMA_CPP_REF:-master}
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      OLLAMA_BASE_MODEL: ${OLLAMA_BASE_MODEL:-hodza/cotype-nano-1.5-unofficial:latest}
+      BASE_MODEL_CONFIG_DIR: /workspace/deploy/models/cotype-nano
+      LLAMA_CPP_DIR: /opt/llama.cpp
+
+  agent-api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.api
+    user: "${UID:-1000}:${GID:-1000}"
+    depends_on:
+      ollama-server:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    ports:
+      - "${API_PUBLISHED_PORT:-8080}:${API_PORT:-8080}"
+    volumes:
+      - ./src:/app/src
+      - ${LORA_HOST_DIR:-./deploy/lora_adapters}:/adapters:ro
+    environment:
+      API_BEARER_TOKEN: ${API_BEARER_TOKEN:-change-me}
+      VLLM_URL: ${LLM_BASE_URL:-http://ollama-server:11434/v1}
+      DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-hodza/cotype-nano-1.5-unofficial}
+      DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.3}
+      MAX_TOKENS: ${MAX_TOKENS:-2048}
+      ARTICLE_DEFAULT_SECTIONS: ${ARTICLE_DEFAULT_SECTIONS:-5}
+      ARTICLE_OUTLINE_MAX_TOKENS: ${ARTICLE_OUTLINE_MAX_TOKENS:-800}
+      ARTICLE_CHAPTER_MAX_TOKENS: ${ARTICLE_CHAPTER_MAX_TOKENS:-1700}
+      ARTICLE_SUMMARY_MAX_TOKENS: ${ARTICLE_SUMMARY_MAX_TOKENS:-400}
+      ARTICLE_MIN_SECTION_CHARS: ${ARTICLE_MIN_SECTION_CHARS:-200}
+      ARTICLE_CONTEXT_SECTIONS_LIMIT: ${ARTICLE_CONTEXT_SECTIONS_LIMIT:-3}
+      PYTHONPATH: /app
+      HOME: /tmp
+    command: >
+      uvicorn src.app.main:app
+      --host ${API_HOST:-0.0.0.0}
+      --port ${API_PORT:-8080}
+      --reload
+      --reload-dir /app/src

@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+ARG LLAMA_CPP_REF=master
+
+WORKDIR /opt
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --depth 1 --branch "${LLAMA_CPP_REF}" https://github.com/ggml-org/llama.cpp.git /opt/llama.cpp
+
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:${PATH}"
+
+RUN pip install --no-cache-dir -r /opt/llama.cpp/requirements/requirements-convert_lora_to_gguf.txt
+
+WORKDIR /workspace
+
+CMD ["sh"]

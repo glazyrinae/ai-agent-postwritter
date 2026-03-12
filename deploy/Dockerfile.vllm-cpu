@@ -1,0 +1,87 @@
+FROM ubuntu:22.04 AS base
+
+ARG PYTHON_VERSION=3.12
+ARG VLLM_REF=v0.8.5
+ARG PIP_EXTRA_INDEX_URL=https://download.pytorch.org/whl/cpu
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PATH=/root/.local/bin:/opt/venv/bin:$PATH
+ENV VIRTUAL_ENV=/opt/venv
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python
+ENV PIP_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_EXTRA_INDEX_URL=${PIP_EXTRA_INDEX_URL}
+ENV UV_INDEX_STRATEGY=unsafe-best-match
+ENV UV_LINK_MODE=copy
+ENV UV_HTTP_TIMEOUT=500
+ENV VLLM_TARGET_DEVICE=cpu
+ENV CC=/usr/bin/gcc-12
+ENV CXX=/usr/bin/g++-12
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    ccache \
+    curl \
+    ffmpeg \
+    gcc-12 \
+    g++-12 \
+    git \
+    libgl1 \
+    libnuma-dev \
+    libsm6 \
+    libtcmalloc-minimal4 \
+    libxext6 \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 10 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN uv venv --python ${PYTHON_VERSION} --seed ${VIRTUAL_ENV}
+
+WORKDIR /workspace
+
+RUN git clone --depth 1 --branch ${VLLM_REF} https://github.com/vllm-project/vllm.git
+
+WORKDIR /workspace/vllm
+
+RUN uv pip install --upgrade pip && \
+    uv pip install "setuptools<81" wheel && \
+    uv pip install -r requirements/cpu.txt && \
+    uv pip install intel-openmp==2024.2.1 intel_extension_for_pytorch==2.6.0 && \
+    uv pip install -r requirements/build.txt && \
+    uv pip install "transformers==4.46.2"
+
+RUN python3 - <<'PY'
+from pathlib import Path
+import re
+
+path = Path("/workspace/vllm/vllm/transformers_utils/tokenizer.py")
+text = path.read_text()
+pattern = re.compile(
+    r"tokenizer_all_special_tokens_extended = \(\n\s*tokenizer\.all_special_tokens_extended\)"
+)
+replacement = (
+    "tokenizer_all_special_tokens_extended = (\n"
+    "        getattr(tokenizer, 'all_special_tokens_extended', tokenizer.all_special_tokens))"
+)
+new_text, count = pattern.subn(replacement, text, count=1)
+if count != 1:
+    raise SystemExit("Expected tokenizer compatibility line was not found in vLLM source.")
+path.write_text(new_text)
+PY
+
+RUN VLLM_TARGET_DEVICE=cpu python3 setup.py bdist_wheel
+
+RUN uv pip install dist/*.whl
+
+WORKDIR /app
+
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc_minimal.so.4:/opt/venv/lib/libiomp5.so
+ENV HOME=/tmp
+ENV HF_HOME=/tmp/huggingface
+ENV TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor
+ENV USER=root
+ENV LOGNAME=root
+
+EXPOSE 8000
+
+ENTRYPOINT ["vllm", "serve"]

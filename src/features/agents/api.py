@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from src.app.container import AppContainer, get_container
-from src.features.agents.schemas import MultiAgentRequest
+from src.features.agents.schemas import DebugPromptRequest, DebugPromptResponse, MultiAgentRequest
 
 public_router = APIRouter(tags=["agents"])
 router = APIRouter(tags=["agents"])
@@ -76,3 +76,25 @@ async def run_pipeline(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"pipeline": request.pipeline, "result": final_response}
+
+
+@router.post(
+    "/debug/prompt",
+    response_model=DebugPromptResponse,
+    summary="Прямой debug-вызов backend-модели",
+    description=(
+        "Принимает произвольный prompt и опциональное имя backend-модели. "
+        "Если модель не передана, используется базовая модель из настроек. "
+        "Этот endpoint ходит в backend напрямую, без LangChain pipeline и без article orchestration."
+    ),
+    response_description="Имя использованной модели и ее прямой текстовый ответ.",
+)
+async def debug_prompt(
+    request: DebugPromptRequest,
+    container: AppContainer = Depends(get_container),
+):
+    model, result = container.agent_service.debug_prompt(
+        prompt=request.prompt,
+        model=request.model,
+    )
+    return {"model": model, "result": result}

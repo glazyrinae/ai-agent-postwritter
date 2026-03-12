@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 
 from src.app.settings import Settings
+from src.core.errors import EmptyModelResponseError
 from src.integrations.langchain import LangChainAgentOrchestrator
 from src.integrations.vllm_server import VLLMClient
 
@@ -78,3 +79,16 @@ class AgentService:
             temperature=self.settings.default_temperature,
             max_tokens=self.settings.max_tokens,
         )
+
+    def debug_prompt(self, prompt: str, model: str | None = None) -> tuple[str, str]:
+        resolved_model = (model or self.settings.default_model).strip()
+        response = self.vllm_client.chat(
+            model=resolved_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=self.settings.default_temperature,
+            max_tokens=self.settings.max_tokens,
+        )
+        content = (response.choices[0].message.content or "").strip()
+        if not content:
+            raise EmptyModelResponseError("Model returned an empty response.")
+        return resolved_model, content

@@ -6,10 +6,23 @@
 - `GET /health` - базовый healthcheck.
 - `GET /models` - список моделей и LoRA alias из `vLLM`.
 - `POST /pipeline` - LangChain pipeline поверх нескольких agent aliases.
+- `POST /debug/prompt` - прямой debug-вызов backend-модели.
 
 Ответ `POST /pipeline`:
 - `pipeline` - список использованных agent aliases
 - `result` - итоговый текст последнего шага pipeline
+
+### `POST /debug/prompt`
+
+Назначение: отправить произвольный prompt напрямую в backend-модель без LangChain pipeline.
+
+Вход:
+- `prompt`
+- `model` опционально
+
+Выход:
+- `model`
+- `result`
 
 Для всех endpoints, кроме `GET /health`, требуется заголовок:
 
@@ -21,7 +34,7 @@ Authorization: Bearer <API_BEARER_TOKEN>
 
 ### `POST /articles/outline`
 
-Назначение: сгенерировать outline статьи в markdown и сразу распарсить его в структурированный список разделов.
+Назначение: сгенерировать структурированный outline статьи и вернуть его как markdown-outline и как список разделов.
 
 Вход:
 - `topic`
@@ -37,23 +50,36 @@ Authorization: Bearer <API_BEARER_TOKEN>
 
 ### `POST /articles/generate`
 
-Назначение: синхронно сгенерировать полную статью для IT-блога по теме.
+Назначение: синхронно сгенерировать полную статью для IT-блога только по теме. Все остальные параметры сервис берет из серверных настроек.
 
 Вход:
 - `topic`
-- `outline_markdown` опционально
-- `target_audience`
-- `style`
-- `desired_sections_count`
-- `chapter_max_tokens`
-- `context_mode`
-- `include_code_examples`
 
 Выход:
+- `run_id`
+- `status`
 - `title`
 - `outline_markdown`
 - `sections[{title,description,content,summary}]`
 - `article_markdown`
+
+### `GET /articles/runs/{run_id}`
+
+Назначение: получить статус сохраненного article run и уже сохраненные части статьи.
+
+Выход:
+- `run_id`
+- `status`
+- `topic`
+- `title`
+- `current_step`
+- `last_error`
+- `outline_markdown`
+- `sections[{index,title,description,status,content,summary}]`
+
+### `GET /articles/runs/{run_id}/result`
+
+Назначение: получить сохраненный итог статьи по `run_id`, если синхронная генерация уже завершилась.
 
 ## Формат ошибок
 
@@ -73,5 +99,8 @@ Authorization: Bearer <API_BEARER_TOKEN>
 - `OUTLINE_PARSE_FAILED`
 - `UPSTREAM_UNAVAILABLE`
 - `EMPTY_MODEL_RESPONSE`
+- `RESOURCE_NOT_FOUND`
+- `INVALID_STATE`
+- `STORAGE_UNAVAILABLE`
 - `CONFIGURATION_ERROR`
 - `INTERNAL_ERROR`

@@ -28,3 +28,18 @@ class UpstreamServiceError(AppError):
 class EmptyModelResponseError(AppError):
     status_code = 502
     code = "EMPTY_MODEL_RESPONSE"
+
+
+class ResourceNotFoundError(AppError):
+    status_code = 404
+    code = "RESOURCE_NOT_FOUND"
+
+
+class PersistenceError(AppError):
+    status_code = 503
+    code = "STORAGE_UNAVAILABLE"
+
+
+class InvalidStateError(AppError):
+    status_code = 409
+    code = "INVALID_STATE"

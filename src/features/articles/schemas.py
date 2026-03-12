@@ -1,5 +1,3 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -51,41 +49,6 @@ class ArticleGenerateRequest(BaseModel):
         description="Основная тема статьи. Используется и для генерации outline, и для генерации самих глав.",
         examples=["Как Kubernetes упрощает деплой Python-сервисов"],
     )
-    outline_markdown: str | None = Field(
-        default=None,
-        description=(
-            "Готовый outline статьи в markdown. "
-            "Если не передан, сервис сначала сам вызовет этап генерации outline."
-        ),
-    )
-    target_audience: str = Field(
-        default="IT engineers",
-        description="Целевая аудитория статьи. Влияет на глубину объяснений и терминологию.",
-    )
-    style: str = Field(
-        default="практический технический блог",
-        description="Желаемый стиль изложения для всех глав и заключения.",
-    )
-    desired_sections_count: int = Field(
-        default=5,
-        ge=3,
-        le=8,
-        description="Количество разделов, если outline будет генерироваться автоматически.",
-    )
-    chapter_max_tokens: int | None = Field(
-        default=None,
-        ge=500,
-        le=4000,
-        description="Максимальное число токенов на одну главу. Если не задано, используется серверное значение по умолчанию.",
-    )
-    context_mode: Literal["summaries"] = Field(
-        default="summaries",
-        description="Способ передачи контекста между главами. Сейчас поддерживается только summaries.",
-    )
-    include_code_examples: bool = Field(
-        default=True,
-        description="Нужно ли просить модель включать код, CLI-команды или конфигурации там, где это уместно.",
-    )
 
 
 class ArticleSectionResult(BaseModel):
@@ -96,7 +59,29 @@ class ArticleSectionResult(BaseModel):
 
 
 class ArticleGenerateResponse(BaseModel):
+    run_id: str = Field(description="Идентификатор сохраненного запуска article workflow.")
+    status: str = Field(description="Текущий статус article run.")
     title: str = Field(description="Итоговый заголовок статьи.")
     outline_markdown: str = Field(description="Outline статьи в markdown.")
     sections: list[ArticleSectionResult] = Field(description="Все сгенерированные разделы статьи.")
     article_markdown: str = Field(description="Полностью собранная статья в markdown, включая заключение.")
+
+
+class ArticleRunSectionStatus(BaseModel):
+    index: int = Field(description="Порядковый номер раздела.")
+    title: str = Field(description="Название раздела.")
+    description: str = Field(description="Описание раздела.")
+    status: str = Field(description="Статус генерации раздела.")
+    content: str | None = Field(default=None, description="Сохраненный текст раздела, если уже сгенерирован.")
+    summary: str | None = Field(default=None, description="Сохраненное summary раздела, если уже сгенерировано.")
+
+
+class ArticleRunStatusResponse(BaseModel):
+    run_id: str = Field(description="Идентификатор сохраненного запуска article workflow.")
+    status: str = Field(description="Текущий статус запуска.")
+    topic: str = Field(description="Тема статьи.")
+    title: str | None = Field(default=None, description="Заголовок статьи, если уже известен.")
+    current_step: str | None = Field(default=None, description="Последний успешно сохраненный шаг workflow.")
+    last_error: str | None = Field(default=None, description="Текст последней ошибки, если запуск завершился неуспешно.")
+    outline_markdown: str | None = Field(default=None, description="Сохраненный outline статьи.")
+    sections: list[ArticleRunSectionStatus] = Field(description="Состояние разделов статьи.")

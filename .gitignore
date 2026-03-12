@@ -5,6 +5,8 @@ __pycache__/
 .env
 deploy/models/*
 !deploy/models/.gitkeep
+deploy/db_data/*
+!deploy/db_data/.gitkeep
 deploy/gguf_adapters/*
 !deploy/gguf_adapters/.gitkeep
 deploy/modelfiles/*

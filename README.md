@@ -10,6 +10,8 @@ Docker-проект для запуска набора агентов через
 - `ollama-server` как основной OpenAI-compatible backend по умолчанию.
 - `vllm-server` для ручного запуска через compose profile `manual`.
 - `agent-api` на FastAPI в структуре `src/app`, `src/features`, `src/integrations`.
+- `db` на `PostgreSQL` для сохранения article runs и промежуточных результатов генерации.
+- `db` собирается из отдельного `Dockerfile` и запускается с `UID/GID` из env, чтобы bind mount в `deploy/db_data/` не ломался по правам.
 - low-level endpoints для LangChain pipeline, списка моделей и healthcheck.
 - article endpoints для генерации outline и полной статьи.
 - orchestration pipeline и article flow построены через `LangChain`, а backend выбирается на Docker/env уровне без изменения Python-кода.
@@ -29,6 +31,7 @@ cp .env.example .env
 - `API_BEARER_TOKEN` - токен для доступа к защищенным API endpoints.
 - `HF_TOKEN` - нужен только если модель недоступна анонимно.
 - `UID`, `GID` - при необходимости смены пользователя контейнеров.
+- `UID`, `GID` также используются для контейнера PostgreSQL.
 - `LLM_BASE_URL` - OpenAI-compatible backend для `agent-api`. По умолчанию указывает на `ollama-server`.
 - `LLM_DEFAULT_MODEL` - имя модели для текущего backend. По умолчанию `cotype-nano-4bit`.
 - `OLLAMA_HOST_DIR`, `OLLAMA_MODEL_NAME`, `OLLAMA_PUBLISHED_PORT` - параметры Ollama runtime.
@@ -41,6 +44,7 @@ cp .env.example .env
 Ключевые каталоги, которые использует compose:
 
 - `deploy/models/` - базовая Hugging Face модель для `model-downloader` и ручного `vLLM` (сейчас по умолчанию `MTSAIR/Cotype-Nano-4bit`), а также storage для Ollama в `deploy/models/ollama/`.
+- `deploy/db_data/` - bind mount для хранения данных PostgreSQL.
 - `deploy/lora_adapters/` - LoRA-адаптеры.
 - `deploy/gguf_adapters/` - GGUF-адаптеры, сконвертированные из PEFT LoRA.
 - `deploy/modelfiles/` - базовый fallback `Modelfile` и временные `Modelfile` для регистрации Ollama-моделей.
@@ -56,6 +60,8 @@ docker compose config
 На этом шаге стоит убедиться, что:
 
 - `ollama-server` использует `deploy/models/ollama/`.
+- `db` пишет данные в `deploy/db_data/pgdata`, а не прямо в корень bind mount.
+- `agent-api` получает `DATABASE_URL`.
 - `agent-api` получает `LLM_BASE_URL` и `LLM_DEFAULT_MODEL`.
 - `agent-api` получает `API_BEARER_TOKEN`.
 - `llama-converter` при необходимости может быть собран через profile `tools`.
@@ -66,7 +72,7 @@ docker compose config
 По умолчанию запуск идет через `Ollama`:
 
 ```bash
-docker compose up -d ollama-server ollama-init agent-api
+docker compose up -d db ollama-server ollama-init agent-api
 ```
 
 Ручной запуск `vLLM` и загрузчика:
@@ -172,22 +178,22 @@ curl -X POST http://localhost:8080/articles/generate \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "Как Kubernetes упрощает деплой Python-сервисов",
-    "target_audience": "backend engineers",
-    "style": "практический технический блог",
-    "desired_sections_count": 3,
-    "chapter_max_tokens": 1200,
-    "context_mode": "summaries",
-    "include_code_examples": true
+    "topic": "Как Kubernetes упрощает деплой Python-сервисов"
   }'
 ```
 
-Для первой диагностики лучше держать:
+Сервис сам использует серверные defaults для аудитории, стиля, числа разделов и лимитов токенов.
+Во время генерации он сохраняет progress в PostgreSQL и возвращает `run_id`.
 
-- `desired_sections_count: 3`
-- `chapter_max_tokens: 1200`
+Recovery endpoints:
 
-Так быстрее найти инфраструктурные ошибки и не тратить много времени на длинную генерацию.
+```bash
+curl -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  http://localhost:8080/articles/runs/<run_id>
+
+curl -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  http://localhost:8080/articles/runs/<run_id>/result
+```
 
 ## Как тестировать сервис
 
@@ -222,6 +228,8 @@ curl -X POST http://localhost:8080/articles/outline \
   -H "Content-Type: application/json" \
   -d '{
     "topic": "Как Kubernetes упрощает деплой Python-сервисов",
+    "target_audience": "backend engineers",
+    "style": "практический технический блог",
     "desired_sections_count": 3,
     "include_code_examples": true
   }'
@@ -230,11 +238,7 @@ curl -X POST http://localhost:8080/articles/generate \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "Как Kubernetes упрощает деплой Python-сервисов",
-    "desired_sections_count": 3,
-    "chapter_max_tokens": 1200,
-    "context_mode": "summaries",
-    "include_code_examples": true
+    "topic": "Как Kubernetes упрощает деплой Python-сервисов"
   }'
 ```
 
@@ -249,8 +253,11 @@ curl -X POST http://localhost:8080/articles/generate \
 - `GET /`
 - `GET /models`
 - `POST /pipeline`
+- `POST /debug/prompt`
 - `POST /articles/outline`
 - `POST /articles/generate`
+- `GET /articles/runs/{run_id}`
+- `GET /articles/runs/{run_id}/result`
 
 LangChain pipeline поверх agent aliases:
 
@@ -268,6 +275,29 @@ curl -X POST http://localhost:8080/pipeline \
 
 - `pipeline` - список использованных agent aliases
 - `result` - итоговый текст последнего шага pipeline
+
+Прямой debug-вызов backend-модели:
+
+```bash
+curl -X POST http://localhost:8081/debug/prompt \
+  -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Напиши короткий технический абзац про трансформеры"
+  }'
+```
+
+С указанием конкретной модели:
+
+```bash
+curl -X POST http://localhost:8081/debug/prompt \
+  -H "Authorization: Bearer $API_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "hodza/cotype-nano-1.5-unofficial",
+    "prompt": "Напиши короткий технический абзац про трансформеры"
+  }'
+```
 
 Сначала стоит прогнать `POST /articles/outline`, чтобы проверить, что модель стабильно выдает структуру статьи.
 
@@ -295,12 +325,7 @@ curl -X POST http://localhost:8080/articles/generate \
   -H "Authorization: Bearer $API_BEARER_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "topic": "Как Kubernetes упрощает деплой Python-сервисов",
-    "target_audience": "backend engineers",
-    "style": "практический технический блог",
-    "desired_sections_count": 3,
-    "chapter_max_tokens": 1200,
-    "context_mode": "summaries"
+    "topic": "Как Kubernetes упрощает деплой Python-сервисов"
   }'
 ```
 

@@ -6,7 +6,6 @@ from src.features.articles.schemas import ParsedOutlineSection
 
 TITLE_PATTERN = re.compile(r"^\s*#\s+(.+?)\s*$")
 NUMBERED_SECTION_PATTERN = re.compile(r"^\s*(\d+)[\.\)]\s+(.+?)\s*$")
-BULLET_SECTION_PATTERN = re.compile(r"^\s*[-*]\s+(.+?)\s*$")
 
 
 def _split_title_and_description(text: str) -> tuple[str, str]:
@@ -75,13 +74,6 @@ def parse_outline_markdown(outline_markdown: str, fallback_title: str) -> tuple[
             flush_pending()
             pending_index = int(numbered_match.group(1))
             pending_title = numbered_match.group(2).strip()
-            continue
-
-        bullet_match = BULLET_SECTION_PATTERN.match(line)
-        if bullet_match:
-            flush_pending()
-            pending_index = len(sections) + 1
-            pending_title = bullet_match.group(1).strip()
             continue
 
         if pending_title:

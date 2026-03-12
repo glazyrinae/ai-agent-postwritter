@@ -161,6 +161,34 @@ paths:
           $ref: "#/components/responses/UnauthorizedError"
         "503":
           $ref: "#/components/responses/UpstreamUnavailableError"
+  /debug/prompt:
+    post:
+      tags: [agents]
+      summary: Прямой debug-вызов backend-модели
+      description: >
+        Принимает произвольный prompt и опциональное имя backend-модели. Если
+        модель не передана, используется базовая модель из настроек. Endpoint
+        ходит в backend напрямую, без LangChain pipeline и без article
+        orchestration.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DebugPromptRequest"
+      responses:
+        "200":
+          description: Имя использованной модели и ее прямой текстовый ответ.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DebugPromptResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "503":
+          $ref: "#/components/responses/UpstreamUnavailableError"
   /articles/outline:
     post:
       tags: [articles]
@@ -196,10 +224,10 @@ paths:
       tags: [articles]
       summary: Сгенерировать полную статью
       description: >
-        Полный article workflow: при необходимости сервис сначала строит
-        outline, затем последовательно генерирует главы, summaries для контекста
-        следующих глав и финальное заключение. Используйте этот endpoint, когда
-        нужен уже готовый markdown-текст статьи, а не только ее структура.
+        Полный sync article workflow: сервис принимает только тему, сам строит
+        outline, затем последовательно генерирует главы, summaries для
+        контекста, заключение, финальный proofreading pass и сохраняет прогресс
+        в PostgreSQL.
       security:
         - bearerAuth: []
       requestBody:
@@ -210,7 +238,7 @@ paths:
               $ref: "#/components/schemas/ArticleGenerateRequest"
       responses:
         "200":
-          description: Полностью собранная статья, все разделы и итоговый markdown.
+          description: Полностью собранная статья, все разделы, итоговый markdown и run_id.
           content:
             application/json:
               schema:
@@ -221,6 +249,54 @@ paths:
           $ref: "#/components/responses/OutlineParseFailedError"
         "503":
           $ref: "#/components/responses/UpstreamUnavailableError"
+  /articles/runs/{run_id}:
+    get:
+      tags: [articles]
+      summary: Получить статус сохраненного article run
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Текущий статус, outline и уже сохраненные разделы article run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArticleRunStatusResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/ResourceNotFoundError"
+  /articles/runs/{run_id}/result:
+    get:
+      tags: [articles]
+      summary: Получить сохраненный итог статьи по run_id
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Полностью сохраненная статья для завершенного article run.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ArticleGenerateResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "404":
+          $ref: "#/components/responses/ResourceNotFoundError"
+        "409":
+          $ref: "#/components/responses/InvalidStateError"
 components:
   securitySchemes:
     bearerAuth:
@@ -264,6 +340,26 @@ components:
               message: Could not parse outline into sections.
               details:
                 expected_format: "1. Section title :: short description"
+    ResourceNotFoundError:
+      description: Запрошенный article run не найден.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: RESOURCE_NOT_FOUND
+              message: Article run was not found.
+    InvalidStateError:
+      description: Результат article run еще недоступен для чтения.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_STATE
+              message: Article run is not completed yet.
   schemas:
     ErrorResponse:
       type: object
@@ -298,6 +394,29 @@ components:
           example:
             - summarizer
             - writer
+    DebugPromptRequest:
+      type: object
+      required:
+        - prompt
+      properties:
+        model:
+          type: string
+          nullable: true
+          description: Имя backend-модели для прямого debug-вызова. Если не задано, используется базовая модель из настроек.
+          example: hodza/cotype-nano-1.5-unofficial
+        prompt:
+          type: string
+          description: Текст запроса, который будет отправлен в backend-модель напрямую.
+          example: Напиши короткий технический абзац про трансформеры.
+    DebugPromptResponse:
+      type: object
+      properties:
+        model:
+          type: string
+          description: Модель, которая фактически была использована для debug-вызова.
+        result:
+          type: string
+          description: Текстовый ответ backend-модели.
     OutlineRequest:
       type: object
       required:
@@ -368,45 +487,8 @@ components:
       properties:
         topic:
           type: string
-          description: Основная тема статьи. Используется и для генерации outline, и для генерации самих глав.
+          description: Основная тема статьи. Остальные параметры article workflow сервис берет из серверных настроек.
           example: Как Kubernetes упрощает деплой Python-сервисов
-        outline_markdown:
-          type: string
-          nullable: true
-          description: >
-            Готовый outline статьи в markdown. Если не передан, сервис сначала
-            сам вызовет этап генерации outline.
-        target_audience:
-          type: string
-          default: IT engineers
-          description: Целевая аудитория статьи. Влияет на глубину объяснений и терминологию.
-        style:
-          type: string
-          default: практический технический блог
-          description: Желаемый стиль изложения для всех глав и заключения.
-        desired_sections_count:
-          type: integer
-          minimum: 3
-          maximum: 8
-          default: 5
-          description: Количество разделов, если outline будет генерироваться автоматически.
-        chapter_max_tokens:
-          type: integer
-          nullable: true
-          minimum: 500
-          maximum: 4000
-          description: Максимальное число токенов на одну главу.
-          example: 1200
-        context_mode:
-          type: string
-          enum:
-            - summaries
-          default: summaries
-          description: Способ передачи контекста между главами. Сейчас поддерживается только summaries.
-        include_code_examples:
-          type: boolean
-          default: true
-          description: Нужно ли просить модель включать код, CLI-команды или конфигурации там, где это уместно.
     ArticleSectionResult:
       type: object
       properties:
@@ -426,7 +508,20 @@ components:
           description: Краткое summary главы, использованное как контекст для следующих разделов.
     ArticleGenerateResponse:
       type: object
+      required:
+        - run_id
+        - status
+        - title
+        - outline_markdown
+        - sections
+        - article_markdown
       properties:
+        run_id:
+          type: string
+          description: Идентификатор сохраненного запуска article workflow.
+        status:
+          type: string
+          description: Текущий статус article run.
         title:
           type: string
           description: Итоговый заголовок статьи.
@@ -442,3 +537,45 @@ components:
         article_markdown:
           type: string
           description: Полностью собранная статья в markdown, включая заключение.
+    ArticleRunSectionStatus:
+      type: object
+      properties:
+        index:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        content:
+          type: string
+          nullable: true
+        summary:
+          type: string
+          nullable: true
+    ArticleRunStatusResponse:
+      type: object
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+        topic:
+          type: string
+        title:
+          type: string
+          nullable: true
+        current_step:
+          type: string
+          nullable: true
+        last_error:
+          type: string
+          nullable: true
+        outline_markdown:
+          type: string
+          nullable: true
+        sections:
+          type: array
+          items:
+            $ref: "#/components/schemas/ArticleRunSectionStatus"

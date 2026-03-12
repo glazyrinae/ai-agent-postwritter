@@ -1,4 +1,28 @@
 services:
+  db:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.postgres
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "${POSTGRES_PUBLISHED_PORT:-5432}:5432"
+    volumes:
+      - ./deploy/db_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-article_service}
+      POSTGRES_USER: ${POSTGRES_USER:-article_service}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-article_service}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-article_service} -d ${POSTGRES_DB:-article_service}"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
   model-downloader:
     profiles: ["manual"]
     build:
@@ -108,6 +132,8 @@ services:
       dockerfile: deploy/Dockerfile.api
     user: "${UID:-1000}:${GID:-1000}"
     depends_on:
+      db:
+        condition: service_healthy
       ollama-server:
         condition: service_healthy
       ollama-init:
@@ -119,14 +145,24 @@ services:
       - ${LORA_HOST_DIR:-./deploy/lora_adapters}:/adapters:ro
     environment:
       API_BEARER_TOKEN: ${API_BEARER_TOKEN:-change-me}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://article_service:article_service@db:5432/article_service}
+      POSTGRES_HOST: ${POSTGRES_HOST:-db}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-article_service}
+      POSTGRES_USER: ${POSTGRES_USER:-article_service}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-article_service}
       VLLM_URL: ${LLM_BASE_URL:-http://ollama-server:11434/v1}
       DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-hodza/cotype-nano-1.5-unofficial}
       DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.3}
       MAX_TOKENS: ${MAX_TOKENS:-2048}
       ARTICLE_DEFAULT_SECTIONS: ${ARTICLE_DEFAULT_SECTIONS:-5}
+      ARTICLE_DEFAULT_TARGET_AUDIENCE: ${ARTICLE_DEFAULT_TARGET_AUDIENCE:-IT engineers}
+      ARTICLE_DEFAULT_STYLE: ${ARTICLE_DEFAULT_STYLE:-практический технический блог}
+      ARTICLE_DEFAULT_INCLUDE_CODE_EXAMPLES: ${ARTICLE_DEFAULT_INCLUDE_CODE_EXAMPLES:-true}
       ARTICLE_OUTLINE_MAX_TOKENS: ${ARTICLE_OUTLINE_MAX_TOKENS:-800}
       ARTICLE_CHAPTER_MAX_TOKENS: ${ARTICLE_CHAPTER_MAX_TOKENS:-1700}
       ARTICLE_SUMMARY_MAX_TOKENS: ${ARTICLE_SUMMARY_MAX_TOKENS:-400}
+      ARTICLE_PROOFREAD_MAX_TOKENS: ${ARTICLE_PROOFREAD_MAX_TOKENS:-2600}
       ARTICLE_MIN_SECTION_CHARS: ${ARTICLE_MIN_SECTION_CHARS:-200}
       ARTICLE_CONTEXT_SECTIONS_LIMIT: ${ARTICLE_CONTEXT_SECTIONS_LIMIT:-3}
       PYTHONPATH: /app

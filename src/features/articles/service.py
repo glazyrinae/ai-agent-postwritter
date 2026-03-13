@@ -3,7 +3,6 @@ import re
 
 from src.app.settings import Settings
 from src.core.errors import ConfigurationError, EmptyModelResponseError, InvalidStateError, OutlineParseError
-from src.features.articles.parser import parse_outline_markdown
 from src.features.articles.prompts import (
     build_blog_system_prompt,
     build_conclusion_prompt,
@@ -199,9 +198,6 @@ class ArticleService:
         for section in sections:
             lines.append(f"{section.index}. {section.title} :: {section.description}")
         return "\n".join(lines)
-
-    def parse_outline(self, outline_markdown: str, fallback_title: str) -> tuple[str, list[ParsedOutlineSection]]:
-        return parse_outline_markdown(outline_markdown=outline_markdown, fallback_title=fallback_title)
 
     def get_run_status(self, run_id: str) -> ArticleRunStatusResponse:
         run = self.repository.get_run(run_id)

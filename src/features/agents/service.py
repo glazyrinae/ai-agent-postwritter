@@ -1,5 +1,3 @@
-from collections.abc import Iterator
-
 from src.app.settings import Settings
 from src.core.errors import EmptyModelResponseError
 from src.integrations.langchain import LangChainAgentOrchestrator
@@ -24,44 +22,6 @@ class AgentService:
             available = ", ".join(self.settings.available_agents.keys())
             raise ValueError(f"Agent '{agent_name}' not found. Available agents: {available}")
         return self.settings.available_agents[agent_name]
-
-    def call_agent(
-        self,
-        agent_name: str,
-        prompt: str,
-        system_prompt: str | None,
-        temperature: float,
-        max_tokens: int,
-        **kwargs,
-    ) -> str:
-        return self.orchestrator.invoke(
-            agent_name=agent_name,
-            system_prompt=system_prompt or AGENT_SYSTEM_PROMPTS.get(agent_name, ""),
-            user_prompt=prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-
-    def stream_agent(
-        self,
-        agent_name: str,
-        prompt: str,
-        system_prompt: str | None,
-        temperature: float,
-        max_tokens: int,
-        **kwargs,
-    ) -> Iterator[str]:
-        messages: list[dict[str, str]] = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        return self.llm_client.stream(
-            model=agent_name,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            **kwargs,
-        )
 
     def run_pipeline(self, pipeline: list[str], initial_prompt: str) -> str:
         steps: list[dict[str, str]] = []

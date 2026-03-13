@@ -67,9 +67,5 @@ class Settings(BaseSettings):
             self.llm_backend = "ollama"
         return self
 
-    @property
-    def vllm_url(self) -> str:
-        return self.llm_base_url
-
 
 settings = Settings()

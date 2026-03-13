@@ -3,7 +3,7 @@ info:
   title: Multi-Agent System API
   version: 1.0.0
   description: >
-    HTTP API для multi-agent оркестрации поверх OpenAI-compatible backend.
+    HTTP API для multi-agent оркестрации поверх runtime-selectable LLM backend.
     В зависимости от текущей инфраструктуры backend может быть реализован через
     Ollama, vLLM или другой совместимый сервис. API поддерживает низкоуровневый
     pipeline из агентных alias и специализированные endpoints для генерации
@@ -90,7 +90,7 @@ paths:
       description: >
         Запрашивает у upstream backend список доступных моделей. В зависимости от
         текущего runtime это могут быть модели Ollama, vLLM или другой
-        OpenAI-compatible backend. Используйте этот endpoint, чтобы убедиться,
+        совместимый backend. Используйте этот endpoint, чтобы убедиться,
         что нужные `writer`, `summarizer`, `editor` или другие alias реально
         зарегистрированы.
       security:
@@ -339,7 +339,7 @@ components:
               code: OUTLINE_PARSE_FAILED
               message: Could not parse outline into sections.
               details:
-                expected_format: "1. Section title :: short description"
+                expected_format: "{\"title\":\"...\",\"sections\":[{\"title\":\"...\",\"description\":\"...\"}]}"
     ResourceNotFoundError:
       description: Запрошенный article run не найден.
       content:

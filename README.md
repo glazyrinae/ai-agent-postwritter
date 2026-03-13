@@ -14,7 +14,7 @@ Docker-проект для запуска набора агентов через
 - `db` собирается из отдельного `Dockerfile` и запускается с `UID/GID` из env, чтобы bind mount в `deploy/db_data/` не ломался по правам.
 - low-level endpoints для LangChain pipeline, списка моделей и healthcheck.
 - article endpoints для генерации outline и полной статьи.
-- orchestration pipeline и article flow построены через `LangChain`, а backend выбирается на Docker/env уровне без изменения Python-кода.
+- orchestration pipeline и article flow построены через `LangChain`, а backend выбирается через общий `llm_server` слой по env.
 - `model-downloader` для ручной загрузки модели из Hugging Face.
 - `src/integrations/ollama_server/` для Ollama bootstrap-скриптов, локального GGUF fallback и shell workflow.
 - `llama-converter` для контейнерной конверсии PEFT LoRA -> GGUF-adapter под Ollama.
@@ -32,8 +32,10 @@ cp .env.example .env
 - `HF_TOKEN` - нужен только если модель недоступна анонимно.
 - `UID`, `GID` - при необходимости смены пользователя контейнеров.
 - `UID`, `GID` также используются для контейнера PostgreSQL.
-- `LLM_BASE_URL` - OpenAI-compatible backend для `agent-api`. По умолчанию указывает на `ollama-server`.
-- `LLM_DEFAULT_MODEL` - имя модели для текущего backend. По умолчанию `cotype-nano-4bit`.
+- `LLM_BACKEND` - backend для `agent-api`: `ollama` по умолчанию, `vllm` как альтернативный runtime.
+- `LLM_BASE_URL` - адрес выбранного backend для `agent-api`. По умолчанию указывает на `ollama-server`.
+- `LLM_REQUEST_TIMEOUT_SECONDS` - общий timeout upstream LLM-запросов. По умолчанию `1800`.
+- `LLM_DEFAULT_MODEL` - имя модели для текущего backend.
 - `OLLAMA_HOST_DIR`, `OLLAMA_MODEL_NAME`, `OLLAMA_PUBLISHED_PORT` - параметры Ollama runtime.
 - `OLLAMA_BASE_MODEL` - базовая Ollama-модель, поверх которой регистрируются конвертированные LoRA-модели.
 - `LLAMA_CPP_REF` - версия `llama.cpp` для контейнера-конвертера.
@@ -62,7 +64,7 @@ docker compose config
 - `ollama-server` использует `deploy/models/ollama/`.
 - `db` пишет данные в `deploy/db_data/pgdata`, а не прямо в корень bind mount.
 - `agent-api` получает `DATABASE_URL`.
-- `agent-api` получает `LLM_BASE_URL` и `LLM_DEFAULT_MODEL`.
+- `agent-api` получает `LLM_BACKEND`, `LLM_BASE_URL`, `LLM_REQUEST_TIMEOUT_SECONDS` и `LLM_DEFAULT_MODEL`.
 - `agent-api` получает `API_BEARER_TOKEN`.
 - `llama-converter` при необходимости может быть собран через profile `tools`.
 - сервисы запускаются от `UID:GID`.
@@ -335,7 +337,7 @@ curl -X POST http://localhost:8080/articles/generate \
 - `src/core/` - ошибки и логирование.
 - `src/features/agents/` - low-level agent API.
 - `src/features/articles/` - синхронная генерация длинных IT-статей.
-- `src/integrations/vllm_server/` - клиент к OpenAI-compatible backend API.
+- `src/integrations/llm_server/` - общий runtime-клиент для `ollama|vllm` с выбором backend через env.
 - `src/integrations/langchain/` - LangChain orchestration поверх backend-модели.
 - `deploy/` - Dockerfiles, загрузка HF-модели и ручный `vLLM`.
 - `src/integrations/ollama_server/` - Ollama model registration, контейнерная конверсия LoRA и GGUF-артефакты.

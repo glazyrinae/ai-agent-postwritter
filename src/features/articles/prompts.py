@@ -12,13 +12,18 @@ def build_outline_prompt(
     desired_sections_count: int,
     include_code_examples: bool,
 ) -> str:
-    code_examples = "Добавь code examples там, где это полезно." if include_code_examples else "Code examples не обязательны."
+    code_examples = (
+        "Упоминай code examples только в описании, если это действительно нужно."
+        if include_code_examples
+        else "Не упоминай code examples без необходимости."
+    )
     return (
         f'Тема: "{topic}".\n'
-        f"Нужно {desired_sections_count} sections.\n"
-        'Верни только JSON.\n'
+        f"Нужно ровно {desired_sections_count} sections.\n"
+        'Верни только компактный JSON в одну строку.\n'
         'Формат: {"title":"...","sections":[{"title":"...","description":"..."}]}.\n'
-        "Без markdown. Без текста до JSON. Без текста после JSON.\n"
+        "Каждый description: одна короткая фраза, максимум 12 слов.\n"
+        "Без markdown. Без ```json. Без текста до JSON. Без текста после JSON.\n"
         f"{code_examples}"
     )
 

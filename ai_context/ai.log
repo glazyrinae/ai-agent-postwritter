@@ -9,3 +9,4 @@
 2026-03-12 Moved Ollama GGUF adapters and generated Modelfiles into deploy/gguf_adapters and deploy/modelfiles, and synchronized compose mounts, scripts, and docs.
 2026-03-12 Moved the base Ollama fallback Modelfile into deploy/modelfiles and updated the bootstrap entrypoint and docs.
 2026-03-12 Added synchronous PostgreSQL-backed article runs with step-by-step persistence, recovery endpoints, stricter outline parsing, and final proofreading pass.
+2026-03-13 Introduced a generic llm_server integration layer with runtime backend selection between Ollama and vLLM, migrated API/runtime wiring to llm_client naming, and moved LLM timeout into configurable env.

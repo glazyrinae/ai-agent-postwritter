@@ -50,7 +50,7 @@ async def health():
     response_description="Список имен моделей, доступных в текущем backend.",
 )
 async def list_models(container: AppContainer = Depends(get_container)):
-    return {"models": container.vllm_client.list_models()}
+    return {"models": container.llm_client.list_models()}
 
 
 @router.post(

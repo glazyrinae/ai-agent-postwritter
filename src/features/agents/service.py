@@ -3,7 +3,7 @@ from collections.abc import Iterator
 from src.app.settings import Settings
 from src.core.errors import EmptyModelResponseError
 from src.integrations.langchain import LangChainAgentOrchestrator
-from src.integrations.vllm_server import VLLMClient
+from src.integrations.llm_server import LLMClient
 
 
 AGENT_SYSTEM_PROMPTS = {
@@ -14,10 +14,10 @@ AGENT_SYSTEM_PROMPTS = {
 
 
 class AgentService:
-    def __init__(self, settings: Settings, vllm_client: VLLMClient):
+    def __init__(self, settings: Settings, llm_client: LLMClient):
         self.settings = settings
-        self.vllm_client = vllm_client
-        self.orchestrator = LangChainAgentOrchestrator(vllm_client=vllm_client)
+        self.llm_client = llm_client
+        self.orchestrator = LangChainAgentOrchestrator(llm_client=llm_client)
 
     def ensure_agent_name(self, agent_name: str) -> str:
         if agent_name not in self.settings.available_agents:
@@ -55,7 +55,7 @@ class AgentService:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        return self.vllm_client.stream(
+        return self.llm_client.stream(
             model=agent_name,
             messages=messages,
             temperature=temperature,
@@ -82,13 +82,12 @@ class AgentService:
 
     def debug_prompt(self, prompt: str, model: str | None = None) -> tuple[str, str]:
         resolved_model = (model or self.settings.default_model).strip()
-        response = self.vllm_client.chat(
+        content = self.llm_client.generate(
             model=resolved_model,
-            messages=[{"role": "user", "content": prompt}],
+            prompt=prompt,
             temperature=self.settings.default_temperature,
             max_tokens=self.settings.max_tokens,
         )
-        content = (response.choices[0].message.content or "").strip()
-        if not content:
+        if not content.strip():
             raise EmptyModelResponseError("Model returned an empty response.")
-        return resolved_model, content
+        return resolved_model, content.strip()

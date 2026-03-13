@@ -1,15 +1,15 @@
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableLambda
 
 from src.core.errors import EmptyModelResponseError
-from src.integrations.vllm_server import VLLMClient
+from src.integrations.llm_server import LLMClient
 
 
 class LangChainAgentOrchestrator:
-    """LangChain-based orchestration over vLLM agent aliases."""
+    """LangChain-based orchestration over LLM agent aliases."""
 
-    def __init__(self, vllm_client: VLLMClient):
-        self.vllm_client = vllm_client
+    def __init__(self, llm_client: LLMClient):
+        self.client = llm_client
 
     def invoke(
         self,
@@ -19,11 +19,8 @@ class LangChainAgentOrchestrator:
         temperature: float,
         max_tokens: int,
     ) -> str:
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", "{system_prompt}"),
-                ("human", "{user_prompt}"),
-            ]
+        prompt = PromptTemplate.from_template(
+            "Инструкции:\n{system_prompt}\n\nЗапрос:\n{user_prompt}"
         )
         chain = prompt | RunnableLambda(
             lambda prompt_value: self._invoke_model(
@@ -44,16 +41,12 @@ class LangChainAgentOrchestrator:
         return result.strip()
 
     def _invoke_model(self, agent_name: str, prompt_value, temperature: float, max_tokens: int) -> str:
-        response = self.vllm_client.chat(
+        return self.client.generate(
             model=agent_name,
-            messages=[
-                {"role": message.type, "content": message.content}
-                for message in prompt_value.to_messages()
-            ],
+            prompt=prompt_value.to_string(),
             temperature=temperature,
             max_tokens=max_tokens,
         )
-        return response.choices[0].message.content or ""
 
     def run_pipeline(
         self,

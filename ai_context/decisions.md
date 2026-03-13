@@ -21,6 +21,9 @@
 - Синхронная генерация статьи сохраняет outline, sections, summaries и итог в PostgreSQL по шагам.
 - Внешний клиент для `POST /articles/generate` передает только тему статьи; остальные параметры article flow задаются серверными defaults.
 - Архитектура article feature заложена под будущий переход на async jobs через `run_id` и сохраненное состояние.
+- Runtime LLM-клиент вынесен в общий `src/integrations/llm_server/` с выбором backend `ollama|vllm` через env.
+- Основной runtime по умолчанию — `ollama`; старый `VLLM_URL` сохраняется как compatibility alias для `LLM_BASE_URL`.
+- Upstream timeout для LLM-запросов задается через единый `LLM_REQUEST_TIMEOUT_SECONDS`.
 
 ## Документация
 

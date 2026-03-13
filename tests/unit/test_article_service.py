@@ -2,28 +2,34 @@ from types import SimpleNamespace
 
 from src.app.settings import Settings
 from src.core.errors import ConfigurationError, EmptyModelResponseError
+from src.features.articles.repository import ArticleRunRepository
 from src.features.articles.schemas import ArticleSectionResult
 from src.features.articles.service import ArticleService
 
 
-class FakeVLLMClient:
+class FakeLLMClient:
     def __init__(self, responses: list[str]):
         self.responses = responses
         self.calls = []
 
-    def chat(self, **kwargs):
+    def generate(self, **kwargs):
         self.calls.append(kwargs)
-        content = self.responses.pop(0)
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-        )
+        return self.responses.pop(0)
+
+
+class FakeRepository:
+    def __getattr__(self, name):
+        def _noop(*args, **kwargs):
+            return None
+
+        return _noop
 
 
 def test_article_service_requires_writer_alias():
     settings = Settings()
     settings.available_agents = {"editor": "editor"}
     try:
-        ArticleService(settings=settings, vllm_client=FakeVLLMClient([]))
+        ArticleService(settings=settings, llm_client=FakeLLMClient([]), repository=FakeRepository())
     except ConfigurationError as exc:
         assert exc.code == "CONFIGURATION_ERROR"
     else:
@@ -31,7 +37,7 @@ def test_article_service_requires_writer_alias():
 
 
 def test_compile_article_builds_markdown_document():
-    service = ArticleService(settings=Settings(), vllm_client=FakeVLLMClient(["ok"]))
+    service = ArticleService(settings=Settings(), llm_client=FakeLLMClient(["ok"]), repository=FakeRepository())
     article = service.compile_article(
         title="Kubernetes",
         sections=[
@@ -53,7 +59,7 @@ def test_compile_article_builds_markdown_document():
 def test_generate_section_raises_when_content_is_too_short():
     settings = Settings()
     settings.article_min_section_chars = 50
-    service = ArticleService(settings=settings, vllm_client=FakeVLLMClient(["слишком коротко"]))
+    service = ArticleService(settings=settings, llm_client=FakeLLMClient(["слишком коротко"]), repository=FakeRepository())
 
     try:
         service.generate_section(
@@ -73,8 +79,8 @@ def test_generate_section_raises_when_content_is_too_short():
 
 
 def test_summaries_use_summarizer_agent_when_available():
-    fake_client = FakeVLLMClient(["Краткое summary раздела."])
-    service = ArticleService(settings=Settings(), vllm_client=fake_client)
+    fake_client = FakeLLMClient(["Краткое summary раздела."])
+    service = ArticleService(settings=Settings(), llm_client=fake_client, repository=FakeRepository())
 
     summary = service.summarize_section_for_context(
         section_title="Раздел",

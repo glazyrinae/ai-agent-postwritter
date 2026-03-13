@@ -151,8 +151,12 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-article_service}
       POSTGRES_USER: ${POSTGRES_USER:-article_service}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-article_service}
-      VLLM_URL: ${LLM_BASE_URL:-http://ollama-server:11434/v1}
-      DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-hodza/cotype-nano-1.5-unofficial}
+      LLM_BACKEND: ${LLM_BACKEND:-ollama}
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama-server:11434}
+      LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-1800}
+      LLM_DEFAULT_MODEL: ${LLM_DEFAULT_MODEL:-hodza/cotype-nano-1.5-unofficial}
+      VLLM_URL: ${VLLM_URL:-}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-}
       DEFAULT_TEMPERATURE: ${DEFAULT_TEMPERATURE:-0.3}
       MAX_TOKENS: ${MAX_TOKENS:-2048}
       ARTICLE_DEFAULT_SECTIONS: ${ARTICLE_DEFAULT_SECTIONS:-5}

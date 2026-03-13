@@ -1,4 +1,5 @@
 import json
+import re
 
 from src.app.settings import Settings
 from src.core.errors import ConfigurationError, EmptyModelResponseError, InvalidStateError, OutlineParseError
@@ -23,7 +24,7 @@ from src.features.articles.schemas import (
     ParsedOutlineSection,
 )
 from src.integrations.langchain import LangChainAgentOrchestrator
-from src.integrations.vllm_server import VLLMClient
+from src.integrations.llm_server import LLMClient
 
 
 class ArticleService:
@@ -45,11 +46,11 @@ class ArticleService:
         "привет",
     )
 
-    def __init__(self, settings: Settings, vllm_client: VLLMClient, repository: ArticleRunRepository):
+    def __init__(self, settings: Settings, llm_client: LLMClient, repository: ArticleRunRepository):
         self.settings = settings
-        self.vllm_client = vllm_client
+        self.llm_client = llm_client
         self.repository = repository
-        self.orchestrator = LangChainAgentOrchestrator(vllm_client=vllm_client)
+        self.orchestrator = LangChainAgentOrchestrator(llm_client=llm_client)
         if "writer" not in self.settings.available_agents:
             raise ConfigurationError("Agent alias 'writer' must be configured in available_agents.")
         self.writer_agent = self.settings.available_agents["writer"]
@@ -58,7 +59,7 @@ class ArticleService:
 
     def generate_outline(self, request: OutlineRequest) -> OutlineResponse:
         raw_outline = self._invoke_agent(
-            agent_name=self.writer_agent,
+            agent_name=self.settings.default_model or self.writer_agent,
             prompt=build_outline_prompt(
                 topic=request.topic,
                 desired_sections_count=request.desired_sections_count,
@@ -111,14 +112,21 @@ class ArticleService:
         try:
             payload = json.loads(candidate)
         except json.JSONDecodeError as exc:
-            raise OutlineParseError(
-                message="Could not parse outline into sections.",
-                details={
-                    "expected_format": '{"title":"...","sections":[{"title":"...","description":"..."}]}',
-                    "raw_outline_preview": raw_outline[:600],
-                    "reason": str(exc),
-                },
-            ) from exc
+            fallback_parsed = self._parse_structured_outline_fallback(
+                candidate=candidate,
+                fallback_title=fallback_title,
+                expected_sections_count=expected_sections_count,
+            )
+            if fallback_parsed is None:
+                raise OutlineParseError(
+                    message="Could not parse outline into sections.",
+                    details={
+                        "expected_format": '{"title":"...","sections":[{"title":"...","description":"..."}]}',
+                        "raw_outline_preview": raw_outline[:600],
+                        "reason": str(exc),
+                    },
+                ) from exc
+            return fallback_parsed
 
         title = str(payload.get("title") or fallback_title).strip()
         raw_sections = payload.get("sections")
@@ -158,6 +166,32 @@ class ArticleService:
                 },
             )
 
+        return title, sections
+
+    def _parse_structured_outline_fallback(
+        self,
+        candidate: str,
+        fallback_title: str,
+        expected_sections_count: int,
+    ) -> tuple[str, list[ParsedOutlineSection]] | None:
+        title_match = re.search(r'"title"\s*:\s*"([^"]+)"', candidate)
+        title = (title_match.group(1).strip() if title_match else fallback_title) or fallback_title
+        section_matches = re.findall(
+            r'\{\s*"title"\s*:\s*"([^"]+)"\s*,\s*"description"\s*:\s*"([^"]+)"\s*\}',
+            candidate,
+            flags=re.DOTALL,
+        )
+        if len(section_matches) != expected_sections_count:
+            return None
+
+        sections = [
+            ParsedOutlineSection(
+                index=index,
+                title=section_title.strip(),
+                description=section_description.strip(),
+            )
+            for index, (section_title, section_description) in enumerate(section_matches, start=1)
+        ]
         return title, sections
 
     def _build_outline_markdown(self, title: str, sections: list[ParsedOutlineSection]) -> str:

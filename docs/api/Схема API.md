@@ -4,7 +4,7 @@
 
 - `GET /` - мета-информация о сервисе и доступных агентах.
 - `GET /health` - базовый healthcheck.
-- `GET /models` - список моделей и LoRA alias из `vLLM`.
+- `GET /models` - список моделей и alias из выбранного LLM backend.
 - `POST /pipeline` - LangChain pipeline поверх нескольких agent aliases.
 - `POST /debug/prompt` - прямой debug-вызов backend-модели.
 
